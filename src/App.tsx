@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { App as AntApp, Badge, Button, Card, Col, Descriptions, Empty, Form, Input, Layout, List, Menu, Row, Select, Space, Statistic, Table, Tag, Timeline, Typography, message } from 'antd';
+import { App as AntApp, Badge, Button, Card, Col, Descriptions, Drawer, Empty, Form, Input, Layout, List, Menu, Row, Select, Space, Statistic, Table, Tag, Timeline, Typography, message } from 'antd';
 import { ClockCircleOutlined, FlagOutlined, PlusOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
@@ -7,8 +7,9 @@ import { useTranslation } from 'react-i18next';
 import { useDispatch, useSelector } from 'react-redux';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
-import { addProtest, saveResult, setRaceStatus, transitionProtest, type AppDispatch, type RootState } from './store';
+import { addProtest, publishResult, saveResult, setRaceStatus, transitionProtest, type AppDispatch, type RootState } from './store';
 import { useGetOfficialsQuery } from './api';
+import TimingPage, { VersionHistory } from './TimingPage';
 import type { RaceEntry } from './types';
 
 const { Header, Content, Sider } = Layout;
@@ -77,7 +78,9 @@ function ControlPage() {
 function ResultsPage() {
   const dispatch = useDispatch<AppDispatch>();
   const entries = useSelector((state: RootState) => state.regatta.entries);
+  const resultVersions = useSelector((state: RootState) => state.regatta.resultVersions);
   const [api, contextHolder] = message.useMessage();
+  const [historyEntryId, setHistoryEntryId] = useState<string | null>(null);
   const { register, handleSubmit, reset, formState: { errors } } = useForm<z.infer<typeof resultSchema>>({
     resolver: zodResolver(resultSchema),
     defaultValues: { id: entries[0]?.id, elapsedSeconds: 3200, penaltySeconds: 0, note: '' }
@@ -87,6 +90,9 @@ function ResultsPage() {
     api.success('成绩已更正并进入待发布状态');
     reset();
   };
+  const historyVersions = historyEntryId
+    ? resultVersions.filter((item) => item.entryId === historyEntryId).sort((a, b) => b.version - a.version)
+    : [];
   return (
     <>
       {contextHolder}
@@ -108,15 +114,19 @@ function ResultsPage() {
           <Card title="临时与正式成绩">
             <List dataSource={entries} renderItem={(entry) => (
               <List.Item actions={[
-                <Button key="publish" size="small" type="link" onClick={() => dispatch(saveResult({ id: entry.id, elapsedSeconds: entry.elapsedSeconds, penaltySeconds: entry.penaltySeconds, note: entry.note, official: true }))}>发布正式</Button>
+                <Button key="history" size="small" type="link" onClick={() => setHistoryEntryId(entry.id)}>版本历史</Button>,
+                <Button key="publish" size="small" type="link" onClick={() => { dispatch(publishResult({ entryId: entry.id })); api.success(`${entry.boat} 成绩已发布为正式成绩`); }}>发布正式</Button>
               ]}>
                 <List.Item.Meta title={`${entry.boat} · ${entry.elapsedSeconds + entry.penaltySeconds} 秒`} description={entry.note || '无更正说明'} />
-                <Tag color={entry.resultStatus === 'official' ? 'green' : 'orange'}>{entry.resultStatus}</Tag>
+                <Tag color={entry.resultStatus === 'official' ? 'green' : entry.resultStatus === 'corrected' ? 'orange' : 'default'}>{entry.resultStatus}</Tag>
               </List.Item>
             )} />
           </Card>
         </Col>
       </Row>
+      <Drawer title="成绩版本历史" open={historyEntryId !== null} onClose={() => setHistoryEntryId(null)} width={420}>
+        {historyEntryId && <VersionHistory versions={historyVersions} />}
+      </Drawer>
     </>
   );
 }
@@ -185,12 +195,14 @@ function Shell() {
         <Sider width={210} breakpoint="lg" collapsedWidth="0" theme="light">
           <Menu mode="inline" selectedKeys={[location.pathname]} onClick={({ key }) => navigate(key)} items={[
             { key: '/', label: t('control'), icon: <FlagOutlined /> },
+            { key: '/timing', label: t('timing'), icon: <ClockCircleOutlined /> },
             { key: '/results', label: t('results'), icon: <ClockCircleOutlined /> },
             { key: '/protests', label: t('protests'), icon: <SafetyCertificateOutlined /> }
           ]} />
         </Sider>
         <Content className="content"><Routes>
           <Route path="/" element={<ControlPage />} />
+          <Route path="/timing" element={<TimingPage />} />
           <Route path="/results" element={<ResultsPage />} />
           <Route path="/protests" element={<ProtestsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
